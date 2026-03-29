@@ -215,11 +215,16 @@ export const StepAnimator: React.FC<StepAnimatorProps> = ({ result }) => {
         
         <h3 className="text-2xl font-bold text-gray-900 mb-4 text-center">{currentStep.title}</h3>
         
-        <div className="flex items-center justify-center gap-3 mb-6">
-          {currentStep.status === 'satisfied' && <span className="text-green-500 text-2xl">✓</span>}
-          {currentStep.status === 'violated' && <span className="text-red-500 text-2xl">✗</span>}
-          {currentStep.status === 'checking' && <span className="animate-pulse text-teal-500 text-2xl">⚡</span>}
-          <p className="text-lg text-gray-600 max-w-2xl text-center whitespace-pre-wrap">{currentStep.body}</p>
+        <div className="w-full max-w-3xl bg-gray-50 rounded-lg p-6 border border-gray-200 mt-2 relative">
+          <div className="absolute -top-3 left-6 bg-white px-2 text-xs font-bold text-teal-600 uppercase tracking-wider border border-teal-100 rounded">
+            Why? / Mathematical Reasoning
+          </div>
+          <div className="flex items-center justify-center gap-3">
+            {currentStep.status === 'satisfied' && <span className="text-green-500 text-3xl">✓</span>}
+            {currentStep.status === 'violated' && <span className="text-red-500 text-3xl">✗</span>}
+            {currentStep.status === 'checking' && <span className="animate-pulse text-teal-500 text-3xl">⚡</span>}
+            <p className="text-lg text-gray-700 max-w-2xl whitespace-pre-wrap">{currentStep.body}</p>
+          </div>
         </div>
 
         {currentStep.highlight && currentStep.highlight.length > 0 && (

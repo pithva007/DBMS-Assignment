@@ -10,6 +10,7 @@ import StepAnimator from '../components/StepAnimator';
 import { NormalizationResult } from '../types/normalization';
 import { runNormalization } from '../utils/normalize';
 import { exportNormalizationReport } from '../utils/exportPDF';
+import * as htmlToImage from 'html-to-image';
 
 const NormalizationTool: React.FC = () => {
   const [schema, setSchema] = useState('');
@@ -66,6 +67,20 @@ const NormalizationTool: React.FC = () => {
     setFDsInput('');
     setResult(null);
     setError(null);
+  };
+
+  const exportImage = async (elementId: string, filename: string) => {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    try {
+      const dataUrl = await htmlToImage.toPng(el, { backgroundColor: '#ffffff' });
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Error exporting image', err);
+    }
   };
 
   return (
@@ -148,29 +163,38 @@ const NormalizationTool: React.FC = () => {
 
               {/* Tabbed Visual Analysis */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 flex gap-2">
-                  <button
-                    onClick={() => setActiveTab('graph')}
-                    className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors ${
-                      activeTab === 'graph' 
-                        ? 'bg-teal-600 text-white border-teal-600' 
-                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                    }`}
+                <div className="border-b border-gray-200 bg-gray-50 px-4 py-3 flex justify-between items-center">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setActiveTab('graph')}
+                      className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors ${
+                        activeTab === 'graph' 
+                          ? 'bg-teal-600 text-white border-teal-600' 
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Dependency Graph
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('er')}
+                      className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors ${
+                        activeTab === 'er' 
+                          ? 'bg-teal-600 text-white border-teal-600' 
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      ER Diagram
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => exportImage('diagram-container', `${activeTab}-diagram.png`)}
+                    className="text-sm font-medium text-teal-600 hover:text-teal-700 flex items-center gap-1 border border-teal-200 px-3 py-1.5 rounded-md hover:bg-teal-50 transition-colors"
                   >
-                    Dependency Graph
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('er')}
-                    className={`px-4 py-2 text-sm font-medium border rounded-lg transition-colors ${
-                      activeTab === 'er' 
-                        ? 'bg-teal-600 text-white border-teal-600' 
-                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    ER Diagram
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Save Image
                   </button>
                 </div>
-                <div className="p-4 bg-gray-50">
+                <div id="diagram-container" className="p-4 bg-gray-50">
                   {activeTab === 'graph' ? (
                     <DependencyGraph 
                       attributes={result.originalSchema}

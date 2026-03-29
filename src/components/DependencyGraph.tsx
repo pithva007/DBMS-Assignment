@@ -1,4 +1,22 @@
-import React from 'react';
+import React, { useMemo, useEffect, useCallback } from 'react';
+import ReactFlow, {
+  Controls,
+  MiniMap,
+  Background,
+  MarkerType,
+  useNodesState,
+  useEdgesState,
+  Panel,
+  Handle,
+  Position,
+  NodeProps,
+  EdgeProps,
+  getBezierPath,
+  BaseEdge,
+  EdgeLabelRenderer
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+import dagre from 'dagre';
 import { FunctionalDependency, NormalFormViolation } from '../types/normalization';
 
 interface DependencyGraphProps {
@@ -11,6 +29,113 @@ interface DependencyGraphProps {
   violationsBCNF: NormalFormViolation[];
 }
 
+// Custom Node for Attributes
+const AttributeNode = ({ data, selected }: NodeProps) => {
+  let bgClass = "bg-slate-50 border-slate-400 text-slate-800";
+  let subTextClass = "text-slate-500";
+  
+  if (data.nodeType === 'CK') {
+    bgClass = "bg-teal-50 border-teal-600 text-teal-900";
+    subTextClass = "text-teal-700";
+  } else if (data.nodeType === 'prime') {
+    bgClass = "bg-purple-50 border-purple-500 text-purple-900";
+    subTextClass = "text-purple-700";
+  }
+
+  return (
+    <div 
+      className={`w-16 h-16 rounded-full flex flex-col items-center justify-center border-2 transition-all duration-300 ${selected ? 'shadow-xl scale-110' : 'shadow-md'} ${bgClass}`}
+      title={data.tooltip}
+    >
+      <Handle type="target" position={Position.Left} className="!w-1 !h-1 !bg-transparent !border-none" />
+      <div className="font-bold text-lg">{data.label}</div>
+      <div className={`text-[10px] font-medium tracking-wide ${subTextClass}`}>{data.subLabel}</div>
+      <Handle type="source" position={Position.Right} className="!w-1 !h-1 !bg-transparent !border-none" />
+    </div>
+  );
+};
+
+// Custom Edge with Background Label
+const CustomLabeledEdge = ({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  style = {},
+  markerEnd,
+  data,
+}: EdgeProps) => {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+
+  return (
+    <>
+      <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+      {data?.label && (
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              pointerEvents: 'all',
+            }}
+            className="nodrag nopan bg-white/95 backdrop-blur-sm px-2 py-0.5 rounded shadow-sm text-[10px] font-bold border"
+          >
+            <span style={{ color: data.color }}>{data.label}</span>
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+};
+
+const nodeTypes = { attribute: AttributeNode };
+const edgeTypes = { custom: CustomLabeledEdge };
+
+const getLayoutedElements = (nodes: any[], edges: any[], direction = 'LR') => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
+  
+  const nodeWidth = 90;
+  const nodeHeight = 90;
+
+  dagreGraph.setGraph({ rankdir: direction, ranksep: 180, nodesep: 80 });
+
+  nodes.forEach((node) => {
+    dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const newNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+    return {
+      ...node,
+      targetPosition: 'left',
+      sourcePosition: 'right',
+      position: {
+        x: nodeWithPosition.x - nodeWidth / 2,
+        y: nodeWithPosition.y - nodeHeight / 2,
+      },
+    };
+  });
+
+  return { nodes: newNodes, edges };
+};
+
 export const DependencyGraph: React.FC<DependencyGraphProps> = ({
   attributes,
   fds,
@@ -19,200 +144,174 @@ export const DependencyGraph: React.FC<DependencyGraphProps> = ({
   violations2NF,
   violations3NF,
 }) => {
-  // Determine layout: Left (candidate key attrs), Center (direct deps), Right (transitive deps)
-  const allCandidateKeyAttrs = new Set(candidateKeys.flat());
+  const allCandidateKeyAttrs = useMemo(() => new Set(candidateKeys.flat()), [candidateKeys]);
 
-  const leftAttrs: string[] = [];
-  const centerAttrs: string[] = [];
-  const rightAttrs: string[] = [];
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(() => {
+    const nodes = attributes.map(attr => {
+      let nodeType = 'non-prime';
+      let subLabel = 'non-prime';
+      let tooltip = 'Non-prime Attribute';
 
-  const isTransitive = (attr: string) => {
-    return violations3NF.some(v => v.fd?.rhs.includes(attr));
-  };
+      if (allCandidateKeyAttrs.has(attr)) {
+        nodeType = 'CK';
+        subLabel = 'CK';
+        tooltip = 'Candidate Key Attribute';
+      } else if (primeAttributes.includes(attr)) {
+        nodeType = 'prime';
+        subLabel = 'prime';
+        tooltip = 'Prime Attribute (part of a key)';
+      }
 
-  const isPartial = (attr: string) => {
-    return violations2NF.some(v => v.fd?.rhs.includes(attr));
-  };
+      return {
+        id: attr,
+        type: 'attribute',
+        data: { label: attr, subLabel, nodeType, tooltip },
+        position: { x: 0, y: 0 } // Computed by dagre later
+      };
+    });
 
-  const directlyDetermined = fds
-    .filter(fd => fd.lhs.every(a => allCandidateKeyAttrs.has(a)))
-    .flatMap(fd => fd.rhs);
+    const edges: any[] = [];
+    fds.forEach((fd, fdIdx) => {
+      const isTransitiveFD = violations3NF.some(v => v.fd && v.fd.lhs.join(',') === fd.lhs.join(',') && v.fd.rhs.join(',') === fd.rhs.join(','));
+      const isPartialFD = violations2NF.some(v => v.fd && v.fd.lhs.join(',') === fd.lhs.join(',') && v.fd.rhs.join(',') === fd.rhs.join(','));
+      const isDirectFD = fd.lhs.every(a => allCandidateKeyAttrs.has(a));
 
-  attributes.forEach(attr => {
-    if (allCandidateKeyAttrs.has(attr)) {
-      leftAttrs.push(attr);
-    } else if (isTransitive(attr) && !isPartial(attr)) {
-      rightAttrs.push(attr);
-    } else {
-      centerAttrs.push(attr);
-    }
-  });
+      let stroke = "#94A3B8"; // slate-400
+      let strokeWidth = 1.5;
+      let strokeDasharray = "none";
+      let label = "";
+      let color = "#64748B"; // slate-500
 
-  const nodePositions = new Map<string, { x: number; y: number }>();
+      if (isTransitiveFD) {
+        stroke = "#EF4444"; // red-500
+        strokeWidth = 2;
+        strokeDasharray = "5 5";
+        label = "Transitive";
+        color = "#DC2626";
+      } else if (isPartialFD) {
+        stroke = "#F59E0B"; // amber-500
+        strokeWidth = 2;
+        strokeDasharray = "5 5";
+        label = "Partial";
+        color = "#D97706";
+      } else if (isDirectFD) {
+        stroke = "#0D9488"; // teal-600
+        strokeWidth = 2;
+      }
 
-  let yLeft = 80, yCenter = 80, yRight = 80;
-  
-  leftAttrs.forEach(a => { nodePositions.set(a, { x: 110, y: yLeft }); yLeft += 90; });
-  centerAttrs.forEach(a => { nodePositions.set(a, { x: 340, y: yCenter }); yCenter += 90; });
-  rightAttrs.forEach(a => { nodePositions.set(a, { x: 570, y: yRight }); yRight += 90; });
-
-  const svgHeight = Math.max(300, attributes.length * 90 + 80);
-
-  const renderNode = (attr: string, pos: { x: number, y: number }) => {
-    if (allCandidateKeyAttrs.has(attr)) {
-      return (
-        <g key={attr}>
-          <circle cx={pos.x} cy={pos.y} r={34} fill="#E1F5EE" stroke="#0D9488" strokeWidth={2} />
-          <text x={pos.x} y={pos.y + 6} fontSize={20} fontWeight={600} fill="#085041" textAnchor="middle">{attr}</text>
-          <text x={pos.x} y={pos.y + 22} fontSize={9} fill="#0F6E56" textAnchor="middle">CK</text>
-        </g>
-      );
-    } else if (primeAttributes.includes(attr)) {
-      return (
-        <g key={attr}>
-          <circle cx={pos.x} cy={pos.y} r={28} fill="#EDE9FE" stroke="#7C3AED" strokeWidth={1.5} />
-          <text x={pos.x} y={pos.y + 6} fontSize={18} fill="#3C3489" textAnchor="middle">{attr}</text>
-          <text x={pos.x} y={pos.y + 20} fontSize={9} fill="#534AB7" textAnchor="middle">prime</text>
-        </g>
-      );
-    } else {
-      return (
-        <g key={attr}>
-          <circle cx={pos.x} cy={pos.y} r={26} fill="#F1EFE8" stroke="#888780" strokeWidth={1} />
-          <text x={pos.x} y={pos.y + 6} fontSize={17} fill="#444441" textAnchor="middle">{attr}</text>
-          <text x={pos.x} y={pos.y + 20} fontSize={9} fill="#5F5E5A" textAnchor="middle">non-prime</text>
-        </g>
-      );
-    }
-  };
-
-  const lines: React.ReactNode[] = [];
-
-  fds.forEach((fd, fdIdx) => {
-    const isTransitiveFD = violations3NF.some(v => v.fd === fd);
-    const isPartialFD = violations2NF.some(v => v.fd === fd);
-    const isDirectFD = fd.lhs.every(a => allCandidateKeyAttrs.has(a));
-
-    let stroke = "#888780";
-    let strokeWidth = 1;
-    let strokeDasharray = "none";
-    let markerId = "url(#arrow-gray)";
-    let label = "";
-
-    if (isTransitiveFD) {
-      stroke = "#E24B4A";
-      strokeWidth = 1.5;
-      strokeDasharray = "6 3";
-      markerId = "url(#arrow-red)";
-      label = "transitive";
-    } else if (isPartialFD) {
-      stroke = "#BA7517";
-      strokeWidth = 1.5;
-      strokeDasharray = "3 3";
-      markerId = "url(#arrow-amber)";
-      label = "partial";
-    } else if (isDirectFD) {
-      stroke = "#0D9488";
-      strokeWidth = 2;
-      markerId = "url(#arrow-teal)";
-      label = "→";
-    }
-
-    fd.lhs.forEach(src => {
-      fd.rhs.forEach(tgt => {
-        const sourcePos = nodePositions.get(src);
-        const targetPos = nodePositions.get(tgt);
-        if (!sourcePos || !targetPos) return;
-
-        const dx = targetPos.x - sourcePos.x;
-        const dy = targetPos.y - sourcePos.y;
-        const angle = Math.atan2(dy, dx);
-        
-        const sourceR = allCandidateKeyAttrs.has(src) ? 34 : (primeAttributes.includes(src) ? 28 : 26);
-        const startX = sourcePos.x + sourceR * Math.cos(angle);
-        const startY = sourcePos.y + sourceR * Math.sin(angle);
-        
-        const targetR = allCandidateKeyAttrs.has(tgt) ? 34 : (primeAttributes.includes(tgt) ? 28 : 26);
-        // adjust endX/endY to account for arrow marker size
-        const endX = targetPos.x - (targetR + 6) * Math.cos(angle);
-        const endY = targetPos.y - (targetR + 6) * Math.sin(angle);
-
-        const midX = (startX + endX) / 2;
-        const midY = (startY + endY) / 2;
-
-        lines.push(
-          <g key={`${fdIdx}-${src}-${tgt}`}>
-            <line 
-              x1={startX} y1={startY} 
-              x2={endX} y2={endY} 
-              stroke={stroke} 
-              strokeWidth={strokeWidth} 
-              strokeDasharray={strokeDasharray}
-              markerEnd={markerId}
-            />
-            {label && (
-              <text 
-                x={midX} y={midY - 4} 
-                fontSize={9} 
-                fill={stroke} 
-                textAnchor="middle"
-                transform={`rotate(${angle * 180 / Math.PI}, ${midX}, ${midY})`}
-              >
-                {label}
-              </text>
-            )}
-          </g>
-        );
+      fd.lhs.forEach(src => {
+        fd.rhs.forEach(tgt => {
+          edges.push({
+            id: `e-${fdIdx}-${src}-${tgt}`,
+            source: src,
+            target: tgt,
+            type: label ? 'custom' : 'default', // Only use custom for labeled edges to simplify rendering
+            data: { label, color },
+            animated: isTransitiveFD || isPartialFD,
+            style: { stroke, strokeWidth, strokeDasharray },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 15,
+              height: 15,
+              color: stroke,
+            },
+          });
+        });
       });
     });
-  });
+
+    return getLayoutedElements(nodes, edges);
+  }, [attributes, fds, allCandidateKeyAttrs, primeAttributes, violations2NF, violations3NF]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // Layout recalcs when initial structure changes
+  useEffect(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(initialNodes, initialEdges);
+    setNodes([...layoutedNodes]);
+    setEdges([...layoutedEdges]);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  const handleResetView = useCallback(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(initialNodes, initialEdges, 'LR');
+    setNodes([...layoutedNodes]);
+    setEdges([...layoutedEdges]);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <div className="overflow-x-auto">
-        <svg width="100%" viewBox={`0 0 680 ${svgHeight}`} style={{ minWidth: '600px' }}>
-          <defs>
-            <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#0D9488" strokeWidth="1.5" strokeLinecap="round" />
-            </marker>
-            <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#E24B4A" strokeWidth="1.5" strokeLinecap="round" />
-            </marker>
-            <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#BA7517" strokeWidth="1.5" strokeLinecap="round" />
-            </marker>
-            <marker id="arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" strokeWidth="1.5" strokeLinecap="round" />
-            </marker>
-          </defs>
+    <div className="w-full h-[600px] border border-slate-200 rounded-xl bg-slate-50 overflow-hidden animate-fade-in relative z-0">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        fitView
+        fitViewOptions={{ padding: 50 / 800 }} // Map 50px padding approx
+        minZoom={0.2}
+        maxZoom={2}
+        attributionPosition="bottom-right"
+      >
+        <Background color="#cbd5e1" gap={24} size={1.5} />
+        <Controls showInteractive={false} className="bg-white shadow-md border border-slate-200 rounded-lg overflow-hidden" />
+        
+        <MiniMap 
+          nodeStrokeColor={(n: any) => {
+            if (n.data.nodeType === 'CK') return '#0D9488';
+            if (n.data.nodeType === 'prime') return '#8B5CF6';
+            return '#94A3B8';
+          }}
+          nodeColor={(n: any) => {
+            if (n.data.nodeType === 'CK') return '#F0FDFA';
+            if (n.data.nodeType === 'prime') return '#F5F3FF';
+            return '#F8FAFC';
+          }}
+          nodeBorderRadius={30}
+          className="rounded-lg shadow-md border border-slate-200 bg-white"
+        />
+        
+        <Panel position="top-right" className="bg-white/95 backdrop-blur-sm p-3.5 rounded-lg shadow-md border border-slate-200 text-xs text-slate-700 min-w-[140px]">
+          <div className="font-bold text-slate-800 mb-2.5 pb-1 border-b border-slate-100">Legend</div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-3.5 h-3.5 rounded-full bg-teal-50 border-2 border-teal-600"></div>
+            <span>Candidate Key</span>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-3.5 h-3.5 rounded-full bg-purple-50 border-2 border-purple-500"></div>
+            <span>Prime</span>
+          </div>
+          <div className="flex items-center gap-2 mb-3.5">
+            <div className="w-3.5 h-3.5 rounded-full bg-slate-50 border-2 border-slate-400"></div>
+            <span>Non-prime</span>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-4 h-0.5 bg-teal-600"></div>
+            <span>Direct FD</span>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-4 h-0.5 bg-amber-500 border-dashed border"></div>
+            <span>Partial FD</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-red-500 border-dashed border"></div>
+            <span>Transitive FD</span>
+          </div>
+        </Panel>
 
-          {lines}
-          {attributes.map(attr => nodePositions.has(attr) && renderNode(attr, nodePositions.get(attr)!))}
-
-          {/* Legend */}
-          <g transform="translate(520, 20)">
-            <rect x="0" y="0" width="140" height="150" fill="white" stroke="#E5E7EB" rx="6" />
-            
-            <circle cx="15" cy="20" r="6" fill="#E1F5EE" stroke="#0D9488" />
-            <text x="28" y="23" fontSize="10" fill="#4B5563">Candidate Key</text>
-            
-            <circle cx="15" cy="40" r="6" fill="#EDE9FE" stroke="#7C3AED" />
-            <text x="28" y="43" fontSize="10" fill="#4B5563">Prime Attribute</text>
-            
-            <circle cx="15" cy="60" r="6" fill="#F1EFE8" stroke="#888780" />
-            <text x="28" y="63" fontSize="10" fill="#4B5563">Non-prime</text>
-
-            <line x1="10" y1="85" x2="25" y2="85" stroke="#0D9488" strokeWidth="2" />
-            <text x="28" y="88" fontSize="10" fill="#4B5563">Direct FD</text>
-
-            <line x1="10" y1="105" x2="25" y2="105" stroke="#BA7517" strokeWidth="1.5" strokeDasharray="2 2" />
-            <text x="28" y="108" fontSize="10" fill="#4B5563">Partial FD</text>
-
-            <line x1="10" y1="125" x2="25" y2="125" stroke="#E24B4A" strokeWidth="1.5" strokeDasharray="4 2" />
-            <text x="28" y="128" fontSize="10" fill="#4B5563">Transitive FD</text>
-          </g>
-        </svg>
-      </div>
+        <Panel position="top-left">
+          <button 
+            onClick={handleResetView}
+            className="bg-white text-slate-700 text-xs font-semibold px-3 py-1.5 shadow-md border border-slate-200 rounded-md hover:bg-slate-50 transition-colors flex items-center gap-1.5"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Reset View
+          </button>
+        </Panel>
+      </ReactFlow>
     </div>
   );
 };
