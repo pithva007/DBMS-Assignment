@@ -1,0 +1,300 @@
+import jsPDF from 'jspdf';
+import { NormalizationResult, NormalFormViolation } from '../types/normalization';
+
+export function exportNormalizationReport(
+  result: NormalizationResult,
+  schemaInput: string,
+  fdsInput: string
+): void {
+  const doc = new jsPDF();
+  let currentPage = 1;
+  const totalPages = 5;
+
+  const TEAL: [number, number, number] = [13, 148, 136];
+  const DARK: [number, number, number] = [17, 24, 39];
+  const MEDIUM: [number, number, number] = [55, 65, 81];
+  const LIGHT: [number, number, number] = [156, 163, 175];
+  const WHITE: [number, number, number] = [255, 255, 255];
+  const GREEN: [number, number, number] = [16, 185, 129];
+  const RED: [number, number, number] = [239, 68, 68];
+  // const AMBER: [number, number, number] = [245, 158, 11];
+
+  const addPageHeader = (title: string) => {
+    doc.setFillColor(TEAL[0], TEAL[1], TEAL[2]);
+    doc.rect(0, 0, 210, 18, 'F');
+    doc.setTextColor(WHITE[0], WHITE[1], WHITE[2]);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('DB Normalizer', 14, 11);
+    doc.text('Nirma University', 196, 11, { align: 'right' });
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text(title, 105, 11, { align: 'center' });
+    doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  };
+
+  const addPageFooter = () => {
+    doc.setPage(currentPage);
+    doc.setDrawColor(220, 220, 220);
+    doc.line(14, 285, 196, 285);
+    doc.setTextColor(LIGHT[0], LIGHT[1], LIGHT[2]);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('DBMS Assignment | DB Normalization Tool', 14, 290);
+    doc.text(`Page ${currentPage} of ${totalPages}`, 196, 290, { align: 'right' });
+  };
+
+  const addSectionTitle = (title: string, y: number) => {
+    doc.setFillColor(TEAL[0], TEAL[1], TEAL[2]);
+    doc.rect(14, y - 6, 3, 8, 'F');
+    doc.setTextColor(TEAL[0], TEAL[1], TEAL[2]);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text(title, 20, y);
+    doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+    return y + 10;
+  };
+
+  const addTable = (headers: string[], rows: string[][], startY: number): number => {
+    let y = startY;
+    const rowHeight = 10;
+    const colWidth = 182 / headers.length;
+
+    // Header
+    doc.setFillColor(TEAL[0], TEAL[1], TEAL[2]);
+    doc.rect(14, y, 182, rowHeight, 'F');
+    doc.setTextColor(WHITE[0], WHITE[1], WHITE[2]);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    headers.forEach((h, i) => {
+      doc.text(h, 16 + i * colWidth, y + 6);
+    });
+    y += rowHeight;
+
+    // Rows
+    doc.setFont('helvetica', 'normal');
+    doc.setDrawColor(220, 220, 220);
+    rows.forEach((row, rIdx) => {
+      if (y > 270) {
+        // Need to add new page but for simplicity we assume tables fit
+      }
+      doc.setFillColor(rIdx % 2 === 0 ? 255 : 249, rIdx % 2 === 0 ? 255 : 250, rIdx % 2 === 0 ? 255 : 251);
+      doc.rect(14, y, 182, rowHeight, 'FD');
+      doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+      row.forEach((cell, cIdx) => {
+        // Simple truncate if too long
+        let text = cell;
+        if (text.length > 30) text = text.substring(0, 27) + '...';
+        doc.text(text, 16 + cIdx * colWidth, y + 6);
+      });
+      y += rowHeight;
+    });
+    return y;
+  };
+
+  // PAGE 1 — Cover Page
+  doc.setFillColor(TEAL[0], TEAL[1], TEAL[2]);
+  doc.rect(0, 0, 210, 60, 'F');
+  doc.setTextColor(WHITE[0], WHITE[1], WHITE[2]);
+  doc.setFontSize(24);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Database Normalization Report', 105, 30, { align: 'center' });
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Complete Analysis & Step-by-step Decomposition', 105, 42, { align: 'center' });
+
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  let cpY = 80;
+  
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Relation Schema:', 14, cpY);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  doc.text(schemaInput || result.originalSchema.join(', '), 14, cpY + 6);
+  cpY += 20;
+
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Functional Dependencies:', 14, cpY);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  const fdsLines = fdsInput.trim() ? fdsInput.split('\n') : result.fds.map(fd => fd.raw);
+  fdsLines.forEach((line) => {
+    cpY += 6;
+    doc.text(line, 14, cpY);
+  });
+  cpY += 20;
+
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Analysis Date:', 14, cpY);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  doc.text(new Date().toLocaleDateString(), 50, cpY);
+  cpY += 10;
+
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Generated by:', 14, cpY);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  doc.text('DB Normalizer Tool', 50, cpY);
+
+  // Summary row
+  cpY += 30;
+  const boxes = [
+    { title: 'Attributes', value: result.originalSchema.length.toString() },
+    { title: 'FDs', value: result.fds.length.toString() },
+    { title: 'Candidate Keys', value: result.candidateKeys.length.toString() },
+    { title: 'Highest NF', value: result.isBCNF ? 'BCNF' : result.is3NF ? '3NF' : result.is2NF ? '2NF' : '1NF' }
+  ];
+
+  boxes.forEach((box, i) => {
+    const x = 14 + (i * 45.5);
+    doc.setDrawColor(220, 220, 220);
+    doc.setFillColor(249, 250, 251);
+    doc.rect(x, cpY, 42, 25, 'FD');
+    
+    doc.setTextColor(TEAL[0], TEAL[1], TEAL[2]);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(box.value, x + 21, cpY + 12, { align: 'center' });
+    
+    doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(box.title, x + 21, cpY + 20, { align: 'center' });
+  });
+  
+  addPageFooter();
+
+  // PAGE 2 — Attribute Closures
+  doc.addPage();
+  currentPage++;
+  addPageHeader('Attribute Closures');
+  
+  doc.setFontSize(10);
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  const explanation = "The closure X+ of a set of attributes X is the set of all attributes functionally determined by X using the given FDs. If X+ = all attributes, X is a superkey.";
+  doc.text(explanation, 14, 30, { maxWidth: 182 });
+
+  const closureRows = result.closures.map(c => [
+    '{' + c.attributes.join(',') + '}',
+    '{' + c.closure.join(',') + '}',
+    c.isSuperkey ? 'Yes' : 'No',
+    c.isCandidateKey ? 'Yes' : '--'
+  ]);
+  
+  addTable(['Attribute Set', 'Closure (X+)', 'Superkey?', 'Candidate Key?'], closureRows, 45);
+  addPageFooter();
+
+  // PAGE 3 — Candidate Keys & Normal Forms
+  doc.addPage();
+  currentPage++;
+  addPageHeader('Candidate Keys & Normalization');
+  
+  let p3Y = 30;
+  p3Y = addSectionTitle('Candidate Keys', p3Y);
+  
+  const ckRows = result.candidateKeys.map((ck, i) => [
+    `Key ${i + 1}`,
+    `{${ck.join(', ')}}`,
+    i === 0 ? 'Primary Key' : 'Alternate Key'
+  ]);
+  p3Y = addTable(['Key #', 'Attributes', 'Type'], ckRows, p3Y);
+  p3Y += 15;
+
+  p3Y = addSectionTitle('Prime & Non-Prime Attributes', p3Y);
+  doc.setFontSize(10);
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Prime Attributes:', 14, p3Y);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  doc.text(result.primeAttributes.join(', ') || 'None', 55, p3Y);
+  p3Y += 8;
+  
+  doc.setTextColor(DARK[0], DARK[1], DARK[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Non-Prime Attributes:', 14, p3Y);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  doc.text(result.nonPrimeAttributes.join(', ') || 'None', 55, p3Y);
+  p3Y += 15;
+
+  p3Y = addSectionTitle('Normal Form Summary', p3Y);
+  const nfRows = [
+    ['1NF', 'Satisfied', 'None', '--'],
+    ['2NF', result.is2NF ? 'Satisfied' : 'Violated', result.violations2NF.length.toString(), result.is2NF ? '--' : 'Decomposed'],
+    ['3NF', result.is3NF ? 'Satisfied' : 'Violated', result.violations3NF.length.toString(), result.is3NF ? '--' : 'Decomposed'],
+    ['BCNF', result.isBCNF ? 'Satisfied' : 'Violated', result.violationsBCNF.length.toString(), result.isBCNF ? '--' : 'Decomposed']
+  ];
+  addTable(['Normal Form', 'Status', 'Violations', 'Action Taken'], nfRows, p3Y);
+
+  addPageFooter();
+
+  // PAGE 4 — Detailed Violations & Decompositions
+  doc.addPage();
+  currentPage++;
+  addPageHeader('Violations & Decompositions');
+  
+  let p4Y = 30;
+
+  const renderViolations = (title: string, violations: NormalFormViolation[], isSatisfied: boolean) => {
+    if (isSatisfied) return;
+    if (p4Y > 240) { doc.addPage(); p4Y = 30; }
+    p4Y = addSectionTitle(title, p4Y);
+    violations.forEach(v => {
+      if (p4Y > 260) { doc.addPage(); p4Y = 30; }
+      doc.setFontSize(9);
+      doc.setTextColor(RED[0], RED[1], RED[2]);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Violation:', 14, p4Y);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+      const lines = doc.splitTextToSize(v.explanation, 160);
+      doc.text(lines, 35, p4Y);
+      p4Y += lines.length * 5 + 4;
+    });
+    p4Y += 5;
+  };
+
+  renderViolations('2NF Violations', result.violations2NF, result.is2NF);
+  renderViolations('3NF Violations', result.violations3NF, result.is3NF);
+  renderViolations('BCNF Violations', result.violationsBCNF, result.isBCNF);
+
+  addPageFooter();
+
+  // PAGE 5 — Final BCNF Schema
+  doc.addPage();
+  currentPage++;
+  addPageHeader('Final Normalized Schema (BCNF)');
+  
+  doc.setFontSize(10);
+  doc.setTextColor(MEDIUM[0], MEDIUM[1], MEDIUM[2]);
+  doc.setFont('helvetica', 'normal');
+  const introText = `After complete normalization, the original relation R(${result.originalSchema.join(', ')}) has been decomposed into the following BCNF relations. The decomposition is lossless.`;
+  const introLines = doc.splitTextToSize(introText, 182);
+  doc.text(introLines, 14, 30);
+  
+  let p5Y = 30 + introLines.length * 5 + 10;
+
+  const finalRows = result.relationsBCNF.map(r => [
+    r.name,
+    r.attributes.join(', '),
+    r.primaryKey.join(', '),
+    r.fds.map(fd => fd.raw).join(' | ') || 'None'
+  ]);
+
+  p5Y = addTable(['Relation', 'Attributes', 'Primary Key', 'Functional Dependencies'], finalRows, p5Y);
+  
+  p5Y += 15;
+  doc.setFontSize(9);
+  doc.setTextColor(LIGHT[0], LIGHT[1], LIGHT[2]);
+  doc.text("This decomposition eliminates all redundancy based on functional dependencies while preserving the lossless join property.", 105, p5Y, { align: 'center' });
+
+  addPageFooter();
+
+  doc.save(`normalization-report-${Date.now()}.pdf`);
+}

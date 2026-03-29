@@ -166,13 +166,13 @@ export const StepAnimator: React.FC<StepAnimatorProps> = ({ result }) => {
     if (idx !== -1) setSubStep(idx);
   };
 
-  const getPhaseColor = (stepPhase: string) => {
+  const getPhaseColorClasses = (stepPhase: string) => {
     switch (stepPhase) {
-      case '1NF': return 'teal';
-      case '2NF': return 'amber';
-      case '3NF': return 'purple';
-      case 'BCNF': return 'green';
-      default: return 'gray';
+      case '1NF': return 'bg-teal-100 text-teal-800';
+      case '2NF': return 'bg-amber-100 text-amber-800';
+      case '3NF': return 'bg-purple-100 text-purple-800';
+      case 'BCNF': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
     }
   };
 
@@ -208,8 +208,8 @@ export const StepAnimator: React.FC<StepAnimatorProps> = ({ result }) => {
       </div>
 
       {/* Middle Content */}
-      <div className="p-8 min-h-[320px] flex flex-col items-center justify-center transition-opacity duration-200 opacity-100 fade-in">
-        <div className={`mb-4 px-4 py-1 text-sm font-bold uppercase rounded-full bg-${getPhaseColor(currentStep.phase)}-100 text-${getPhaseColor(currentStep.phase)}-800`}>
+      <div key={subStep} className="p-8 min-h-[320px] flex flex-col items-center justify-center animate-fade-in">
+        <div className={`mb-4 px-4 py-1 text-sm font-bold uppercase rounded-full ${getPhaseColorClasses(currentStep.phase)}`}>
           {currentStep.phase}
         </div>
         

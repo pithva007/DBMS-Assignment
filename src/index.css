@@ -28,3 +28,18 @@ body {
 input, textarea {
   font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 }
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
